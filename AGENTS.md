@@ -1,6 +1,5 @@
 # CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance coding agenrs when working with code in this repository.
 
 ## Project overview
 
@@ -119,6 +118,3 @@ Because VS Code's chat history is opaque/text-only between turns, resolved visio
 ### Module layout convention
 
 Most directories under `src/` expose a single `index.ts` barrel that re-exports the public surface; sibling files like `consts.ts`, `types.ts`, and internal implementation modules are meant to be reached only through that barrel, not imported directly from outside the folder. Follow this pattern for new modules.
-
-### 强制要求
-- 使用简体中文回答

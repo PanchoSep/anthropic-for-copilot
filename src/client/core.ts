@@ -139,6 +139,14 @@ export class AnthropicClient {
 							const pending = pendingToolCalls.get(index);
 							if (pending) {
 								pending.function.arguments += delta.partial_json;
+								// Report incremental tool call arguments if callback is provided
+								if (callbacks.onToolCallDelta) {
+									callbacks.onToolCallDelta(
+										pending.id,
+										pending.function.name,
+										pending.function.arguments,
+									);
+								}
 							}
 						}
 						break;
@@ -261,9 +269,14 @@ function accumulateUsage(target: AnthropicUsage, source: Partial<AnthropicUsage>
 		target.cache_creation_input_tokens =
 			(target.cache_creation_input_tokens || 0) + (source as any).cache_creation_input_tokens;
 	}
-	target.prompt_tokens = target.input_tokens;
+	// prompt_tokens debe incluir TODOS los tokens de entrada: input + cache_creation + cache_read
+	const cacheRead = target.cache_read_input_tokens || 0;
+	const cacheCreation = target.cache_creation_input_tokens || 0;
+	target.prompt_tokens = target.input_tokens + cacheRead + cacheCreation;
 	target.completion_tokens = target.output_tokens;
-	target.total_tokens = target.input_tokens + target.output_tokens;
+	target.total_tokens = target.prompt_tokens + target.output_tokens;
+	target.prompt_cache_hit_tokens = target.cache_read_input_tokens;
+	target.prompt_cache_miss_tokens = target.cache_creation_input_tokens;
 }
 
 function reportFinalUsage(callbacks: StreamCallbacks, usage: AnthropicUsage): void {

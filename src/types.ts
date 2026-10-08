@@ -121,6 +121,7 @@ export interface StreamCallbacks {
 	onContent: (content: string) => void;
 	onThinking: (text: string) => void;
 	onToolCall: (toolCall: AnthropicToolCall) => void;
+	onToolCallDelta?: (id: string, name: string, argumentsDelta: string) => void;
 	onError: (error: Error) => void;
 	onDone: () => void;
 	onUsage?: (usage: AnthropicUsage) => void;
