@@ -4,7 +4,7 @@
 
 // ---- API request/response types for Anthropic Messages API ----
 
-export type ReasoningEffort = 'low' | 'high' | 'max';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface AnthropicTextBlock {
 	type: 'text';
@@ -86,8 +86,9 @@ export interface AnthropicUsage {
 }
 
 export interface AnthropicThinkingConfig {
-	type: 'enabled';
-	budget_tokens: number;
+	type: 'enabled' | 'adaptive';
+	budget_tokens?: number;
+	display?: 'summarized';
 }
 
 export interface AnthropicRequest {
@@ -101,7 +102,7 @@ export interface AnthropicRequest {
 	tools?: AnthropicTool[];
 	tool_choice?: { type: 'auto' | 'any' | 'tool'; name?: string } | 'none' | 'auto' | 'required';
 	thinking?: AnthropicThinkingConfig | { type: 'enabled' | 'disabled' };
-	reasoning_effort?: ReasoningEffort;
+	output_config?: { effort?: ReasoningEffort };
 	/** Anthropic beta flags sent as the `anthropic-beta` header. */
 	betas?: string[];
 }
@@ -148,7 +149,7 @@ export interface ThinkingCapability {
 	supportedEfforts: readonly ReasoningEffort[];
 	defaultEffort: ReasoningEffort;
 	canDisable: boolean;
-}
+	adaptiveThinking?: boolean;}
 
 export interface ModelDefinition {
 	id: string;

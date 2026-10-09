@@ -4,13 +4,13 @@ import { safeStringify } from '../../json';
 import type { AnthropicMessage } from '../../types';
 import { API_PROVIDER_HTTP_ERROR_LINKS, MAX_DIAGNOSTIC_FIELD_LENGTH } from '../consts';
 import type {
-	AnthropicRequestErrorKind,
-	ApiProviderId,
-	ErrorActionLink,
-	ErrorActionUrls,
-	HttpErrorLinkDefinition,
-	HttpErrorLinkStatusKey,
-	RequestErrorContext,
+    AnthropicRequestErrorKind,
+    ApiProviderId,
+    ErrorActionLink,
+    ErrorActionUrls,
+    HttpErrorLinkDefinition,
+    HttpErrorLinkStatusKey,
+    RequestErrorContext,
 } from '../types';
 import { getNetworkErrorCauseInfo, getNetworkErrorCode, getNetworkErrorMessage } from './network';
 export type { AnthropicRequestErrorKind, ErrorActionUrls } from '../types';
@@ -342,8 +342,8 @@ function getRequestDiagnosticMessage(context: RequestErrorContext): string {
 		request.top_p !== undefined ? `topP=${request.top_p}` : undefined,
 		request.max_tokens !== undefined ? `maxTokens=${request.max_tokens}` : undefined,
 		request.thinking?.type ? `thinking=${safeStringify(request.thinking.type)}` : undefined,
-		request.reasoning_effort
-			? `reasoningEffort=${safeStringify(request.reasoning_effort)}`
+		request.output_config?.effort
+			? `effort=${safeStringify(request.output_config.effort)}`
 			: undefined,
 		request.tool_choice ? `toolChoice=${safeStringify(request.tool_choice)}` : undefined,
 		`toolCount=${request.tools?.length ?? 0}`,

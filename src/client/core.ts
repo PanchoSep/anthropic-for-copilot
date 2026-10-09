@@ -5,10 +5,10 @@ import { buildSdkAuth, CLAUDE_CODE_IDENTITY_SYSTEM_PROMPT, type Credential } fro
 import { safeStringify } from '../json';
 import { logger } from '../logger';
 import type {
-	AnthropicRequest,
-	AnthropicToolCall,
-	AnthropicUsage,
-	StreamCallbacks,
+    AnthropicRequest,
+    AnthropicToolCall,
+    AnthropicUsage,
+    StreamCallbacks,
 } from '../types';
 import { buildMessagesEndpoint, normalizeSdkBaseUrl } from './base-url';
 import { formatRequestError, normalizeRequestError, sanitizeHeaders } from './error';
@@ -72,6 +72,7 @@ export class AnthropicClient {
 					tools: request.tools as any,
 					tool_choice: request.tool_choice as any,
 					thinking: request.thinking as any,
+					output_config: request.output_config as any,
 					temperature: request.temperature,
 					top_p: request.top_p,
 				},

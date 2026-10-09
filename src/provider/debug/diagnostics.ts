@@ -1316,7 +1316,7 @@ function createRedactedComparisonInput(
 		model: request.model,
 		tool_choice: request.tool_choice ?? null,
 		thinking: request.thinking ?? null,
-		reasoning_effort: request.reasoning_effort ?? null,
+		reasoning_effort: request.output_config?.effort ?? null,
 		tools: toolSummaries,
 		messages: messageSummaries,
 	});

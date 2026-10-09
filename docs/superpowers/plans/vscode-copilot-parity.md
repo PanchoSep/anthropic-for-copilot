@@ -22,39 +22,6 @@ Plan de integración de features enterprise del provider nativo de Anthropic en 
 
 ## Features Identificadas
 
-### 0. **Claude Model Capability System** (FOUNDATIONAL)
-**Prioridad:** Alta (prerequisito para otras features)  
-**Complejidad:** Baja-Media  
-**Impacto:** Alto (habilita feature detection dinámica)
-
-#### Qué es
-Sistema simplificado para detectar capacidades por familia Claude, permitiendo que nuevos modelos hereden capabilities automáticamente.
-
-#### Implementación
-- [ ] Crear `src/capabilities.ts` con detectors Claude-específicos:
-  - `isClaudeSonnet()`, `isClaudeOpus()`, `isClaudeHaiku()`, `isClaudeFable()`
-  - `modelSupportsExtendedThinking()` - Claude Opus 4+
-  - `modelSupportsToolSearch()` - Claude 4.5+
-  - `modelSupportsPDFDocuments()` - todas las familias Claude
-  - `modelSupportsMultiReplaceString()` - todas las familias Claude
-- [ ] Agregar setting `anthropic-copilot.modelCapabilityOverrides` (JSON map)
-  - Permite alias: `{"claude-preview-2026": {"family": "claude-opus-4.7"}}`
-  - Útil para modelos beta sin metadata oficial
-- [ ] Refactorizar capabilities actuales desde consts hardcodeados:
-  - `MODELS[].capabilities` → funciones dinámicas basadas en family
-  - Detection por prefixes: `claude-sonnet-4`, `claude-opus-5`, etc.
-
-**Archivos de referencia VS Code:**
-- `/Users/panchobv/Documents/repos/vscode/extensions/copilot/src/platform/endpoint/common/chatModelCapabilities.ts:75-109` (override interface)
-- Líneas 370-372 (isAnthropicFamily)
-- Líneas 475-510 (tool search support detection)
-
-**Beneficio:** Nuevos modelos Claude (e.g. Opus 5) heredan capabilities sin code change
-
-**Alcance:** SOLO familias Claude, no otros providers
-
----
-
 ### 1. **Tool Deferral** (defer_loading)
 **Prioridad:** Alta  
 **Complejidad:** Media  
@@ -108,28 +75,40 @@ Usar cache ephemeral de 1 hora en lugar de 5 minutos default para system prompts
 
 ---
 
-### 3. **Adaptive Thinking**
+### 3. **Adaptive Thinking** ✅ IMPLEMENTADO
 **Prioridad:** Media  
 **Complejidad:** Baja (mayormente configuración)  
-**Impacto:** Medio (reduce costos thinking 20-40% sin pérdida de calidad)
+**Impacto:** Medio (reduce costos thinking 20-40% sin pérdida de calidad)  
+**Estado:** ✅ Completado (2026-10-08)
 
 #### Qué es
-Modo donde el modelo decide dinámicamente cuánto thinking budget consumir en lugar de un presupuesto fijo.
+Capacidad booleana del modelo que permite que el modelo decida dinámicamente cuánto thinking budget consumir en lugar de un presupuesto fijo.
 
-#### Implementación
-- [ ] Agregar `type: 'adaptive'` como opción en thinking config
-- [ ] Detectar si endpoint soporta adaptive thinking (requiere Anthropic API v2025+)
-- [ ] Modificar `getThinkingBudgetTokens()` para retornar `undefined` cuando adaptive
-- [ ] Actualizar schema de configuración UI para mostrar opción "Adaptive"
-- [ ] Agregar fallback a fixed budget si endpoint no soporta
+**Diferencia clave:** `adaptive_thinking` es una **capacidad del modelo** (booleano), NO un valor de `reasoning_effort`. El `effort` controla CUÁNTO esfuerzo pone el modelo, mientras que `adaptive_thinking` controla CÓMO piensa (adaptativo vs fijo).
 
-**Archivos de referencia VS Code:**
-- `/Users/panchobv/Documents/repos/vscode/extensions/copilot/src/platform/endpoint/node/messagesApi.ts:203-219`
+#### Implementación ✅
+- [x] Agregar `adaptiveThinking?: boolean` como propiedad en `ThinkingCapability`
+- [x] Actualizar `AnthropicThinkingConfig` para soportar `type: 'adaptive' | 'enabled'`
+- [x] Modificar request builder para usar `thinking: { type: 'adaptive', display: 'summarized' }` cuando el modelo lo soporte
+- [x] Configurar `adaptiveThinking: true` en Fable 5.1, Opus 5 y Sonnet 5 (no en Haiku 4.5)
+- [x] Tests unitarios agregados en `tests/unit/adaptive-thinking.test.ts`
 
-**Archivos a modificar:**
-- `src/provider/request.ts` (líneas ~140-150, thinking config)
-- `src/provider/models.ts` (agregar 'adaptive' a ThinkingEffort type)
-- `src/types.ts` (actualizar ThinkingCapability type)
+**Archivos modificados:**
+- `src/types.ts` - Agregado `adaptiveThinking?: boolean` a ThinkingCapability, `type: 'adaptive'` a AnthropicThinkingConfig
+- `src/provider/request.ts` - Detecta `adaptiveThinking` capability y usa `type: 'adaptive'` en lugar de `type: 'enabled'` con budget
+- `src/consts.ts` - Fable 5.1, Opus 5 y Sonnet 5 tienen `adaptiveThinking: true` (Haiku no)
+- `tests/unit/adaptive-thinking.test.ts` - Suite de tests completa
+
+**Cómo funciona:**
+Cuando un modelo tiene `adaptiveThinking: true` en su capability y el usuario NO selecciona "None" en thinking effort, el request builder envía `thinking: { type: 'adaptive', display: 'summarized' }` en lugar de `thinking: { type: 'enabled', budget_tokens: N }`. Esto señala a la API de Anthropic que el modelo debe decidir dinámicamente cuánto thinking consumir basado en la complejidad de la tarea.
+
+**Request resultante:**
+```typescript
+{
+  thinking: { type: 'adaptive', display: 'summarized' },  // ← Thinking adaptativo
+  // NO hay budget_tokens cuando es adaptive
+}
+```
 
 ---
 
@@ -303,22 +282,18 @@ Claude prefiere replace_string/multi_replace_string. Apply patch es GPT-specific
 
 ## Orden de Implementación Sugerido
 
-### Fase 0: Foundation (1 semana)
-**Prerequisito para todo lo demás:**
-1. **Claude Model Capability System** → Habilita feature detection dinámica
-
 ### Fase 1: Quick Wins (1-2 semanas)
-2. **Extended Cache TTL (1h)** → Baja complejidad, alto impacto en costos
-3. **Adaptive Thinking** → Configuración simple si Anthropic API lo soporta
-4. **Multi-Replace String Tool** → Mejor calidad de edits en Claude
+1. **Extended Cache TTL (1h)** → Baja complejidad, alto impacto en costos
+2. **Multi-Replace String Tool** → Mejor calidad de edits en Claude
+3. ✅ **Adaptive Thinking** → COMPLETADO (2026-10-08)
 
 ### Fase 2: Core Optimizations (3-4 semanas)
-5. **Tool Deferral** → Requiere diseño pero crítico para escala con MCP
-6. **Context Management** → Si API pública de Anthropic lo soporta
+4. **Tool Deferral** → Requiere diseño pero crítico para escala con MCP
+5. **Context Management** → Si API pública de Anthropic lo soporta
 
 ### Fase 3: Advanced (TBD)
-7. **PDF Document Support** → Útil pero nicho
-8. **Tool Search** → Solo si Anthropic lo lanza públicamente o viable cliente-only
+6. **PDF Document Support** → Útil pero nicho
+7. **Tool Search** → Solo si Anthropic lo lanza públicamente o viable cliente-only
 
 ### Out of Scope (no implementar - no relevantes para Claude)
 - ❌ **Prompt Cache Breakpoints** (OpenAI Responses API specific)
@@ -394,24 +369,26 @@ Este plan se enfoca **exclusivamente en Anthropic/Claude models**. Features de o
 - **2026-10-08:** Creación inicial con 5 features identificadas de VS Code Copilot
 - **2026-10-08:** Agregadas 6 features desde `chatModelCapabilities.ts`
 - **2026-10-08:** **Limpieza y enfoque en Claude-only**: eliminadas features específicas de otros providers
-  - **8 features Claude-relevant** (6 en roadmap activo + 2 postponed)
-  - **Descartadas:** 6 features no relevantes para Claude (OpenAI, Gemini, Kimi specific)
+- **2026-10-08:** **Removido Model Capability System**: usar consts actuales, no necesario abstraer
+  - **7 features Claude-relevant** (5 en roadmap activo + 2 postponed)
+  - **Descartadas:** 7 features no relevantes (Model Capability System + 6 de otros providers)
+- **2026-10-08:** ✅ **Adaptive Thinking implementado correctamente** - `adaptiveThinking` es una capacidad booleana del modelo (no un valor de effort), agregado a ThinkingCapability, request builder usa `type: 'adaptive'` cuando modelo lo soporta, configurado en Fable/Opus/Sonnet (no en Haiku)
 
 ---
 
 ## Resumen Ejecutivo
 
-**Features Claude de alto impacto para implementar:**
-1. ✅ **Claude Model Capability System** - prerequisito arquitectural
+**FeatuAdaptive Thinking** - optimiza budget dinámicamente ✅ COMPLETADO (2026-10-08)
 2. ✅ **Extended Cache TTL (1h)** - ahorro de costos 50-80%
 3. ✅ **Multi-Replace String Tool** - mejor calidad de edits en Claude
-4. ✅ **Tool Deferral** - reduce tokens 40-60% con muchas MCP tools
-5. ✅ **Adaptive Thinking** - optimiza budget dinámicamente
-6. ✅ **Context Management** - conversaciones ilimitadas (si Anthropic API lo soporta)
-7. ⏸️ **PDF Document Support** - nicho pero útil
-8. ⏸️ **Tool Search** - wait & see si Anthropic lo publica
+4. ✅ **Tool Deferral** - reduce tokens 40-60% con muchas MCP toolsCP tools
+4. ✅ **Adaptive Thinking** - optimiza budget dinámicamente
+5. ✅ **Context Management** - conversaciones ilimitadas (si Anthropic API lo soporta)
+6. ⏸️ **PDF Document Support** - nicho pero útil
+7. ⏸️ **Tool Search** - wait & see si Anthropic lo publica
 
 **Features descartadas (no relevantes para Claude):**
+- Model Capability System (no necesario, usar consts actuales)
 - Prompt Cache Breakpoints (OpenAI Responses API)
 - Verbosity Control (sin evidencia en Claude)
 - Instructions Placement (bajo ROI, solo Claude 3.5 Sonnet)
@@ -419,5 +396,5 @@ Este plan se enfoca **exclusivamente en Anthropic/Claude models**. Features de o
 - Apply Patch Tool (GPT-specific)
 - Telemetría (privacidad)
 
-**Estimación total:** 4-8 semanas de desarrollo (Fase 0-2)
+**Estimación total:** 4-6 semanas de desarrollo (Fase 1-2)
 

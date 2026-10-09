@@ -1,17 +1,17 @@
 import vscode from 'vscode';
 import { AuthManager } from '../auth';
 import { AnthropicClient } from '../client';
-import { getApiModelId, getBaseUrl, getModelDefinition, getMaxTokens } from '../config';
+import { getApiModelId, getBaseUrl, getMaxTokens, getModelDefinition } from '../config';
 import { buildSystemWithClaudeCodeIdentity, isOAuthAccessToken } from '../credentials';
-import { parseModelId } from '../model-id';
 import { t } from '../i18n';
 import { logger } from '../logger';
+import { parseModelId } from '../model-id';
 import type { AnthropicRequest } from '../types';
 import { convertMessages, convertTools, countMessageChars } from './convert';
 import {
-	dumpAnthropicRequest,
-	type CacheDiagnosticsRecorder,
-	type CacheDiagnosticsRun,
+    dumpAnthropicRequest,
+    type CacheDiagnosticsRecorder,
+    type CacheDiagnosticsRun,
 } from './debug';
 import { getConfiguredThinkingEffort, type ModelConfigurationOptions } from './models';
 import type { ReplayMarkerMetadata } from './replay';
@@ -117,6 +117,8 @@ export async function prepareChatRequest({
 		: 'none';
 
 	const thinkingBudget = getThinkingBudgetTokens(configuredThinkingEffort, maxTokens);
+	const useAdaptiveThinking =
+		thinkingCapability !== false && thinkingCapability?.adaptiveThinking === true;
 
 	const { model, betas } = parseModelId(getApiModelId(modelInfo.id));
 
@@ -130,12 +132,22 @@ export async function prepareChatRequest({
 		tools,
 		tool_choice: tools && tools.length > 0 ? { type: 'auto' } : undefined,
 		...(isThinkingModel && configuredThinkingEffort !== 'none'
-			? {
-					thinking: {
-						type: 'enabled',
-						budget_tokens: thinkingBudget,
-					},
-				}
+			? useAdaptiveThinking
+				? {
+						thinking: {
+							type: 'adaptive',
+							display: 'summarized',
+						},
+					}
+				: {
+						thinking: {
+							type: 'enabled',
+							...(thinkingBudget !== undefined ? { budget_tokens: thinkingBudget } : {}),
+						},
+					}
+			: {}),
+		...(isThinkingModel && configuredThinkingEffort !== 'none'
+			? { output_config: { effort: configuredThinkingEffort } }
 			: {}),
 	};
 
@@ -192,7 +204,10 @@ export async function prepareChatRequest({
 	};
 }
 
-function getThinkingBudgetTokens(effort: string, maxTokens: number): number {
+function getThinkingBudgetTokens(effort: string, maxTokens: number): number | undefined {
+	if (effort === 'adaptive') {
+		return undefined;
+	}
 	let ratio = 0.25;
 	if (effort === 'low') {
 		ratio = 0.15;
