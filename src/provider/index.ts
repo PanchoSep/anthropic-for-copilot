@@ -10,6 +10,7 @@ import { VENDOR_ID } from '../consts';
 import { isOfficialAnthropicBaseUrl, normalizeBaseUrl } from '../endpoint';
 import { t } from '../i18n';
 import { logger } from '../logger';
+import { addCacheBreakpoints } from './cache-breakpoints';
 import { createCacheDiagnosticsRecorder, dumpProviderInput } from './debug';
 import { isExtensionHostShutdownCancellation } from './deactivate';
 import { toChatInfo } from './models';
@@ -177,18 +178,21 @@ export class AnthropicChatProvider implements vscode.LanguageModelChatProvider {
 			tools: options.tools,
 		});
 
+		// Agregar cache breakpoints a los mensajes antes de procesarlos
+		const messagesWithCache = addCacheBreakpoints(messages);
+
 		dumpProviderInput({
 			globalStorageUri: this.globalStorageUri,
 			segment,
 			modelInfo,
-			messages,
+			messages: messagesWithCache,
 			requestOptions: options,
 			requestKind,
 		});
 
 		const toolFlow = processToolFlow({
 			stabilizeToolList: getStabilizeToolListEnabled(),
-			messages,
+			messages: messagesWithCache,
 			tools: options.tools,
 			progress,
 			requestKind,
@@ -199,7 +203,7 @@ export class AnthropicChatProvider implements vscode.LanguageModelChatProvider {
 
 		const skillIndex = processSkillIndex({
 			messages: toolFlow.messages,
-			rawMessages: messages,
+			rawMessages: messagesWithCache,
 			requestKind,
 			settings: getSkillIndexSettings(),
 		});

@@ -41,7 +41,12 @@ export interface AnthropicToolResultBlock {
 export interface AnthropicThinkingBlock {
 	type: 'thinking';
 	thinking: string;
-	signature?: string;
+	signature: string;
+}
+
+export interface AnthropicRedactedThinkingBlock {
+	type: 'redacted_thinking';
+	data: string;
 }
 
 export type AnthropicContentBlock =
@@ -49,7 +54,8 @@ export type AnthropicContentBlock =
 	| AnthropicImageBlock
 	| AnthropicToolUseBlock
 	| AnthropicToolResultBlock
-	| AnthropicThinkingBlock;
+	| AnthropicThinkingBlock
+	| AnthropicRedactedThinkingBlock;
 
 export interface AnthropicMessage {
 	role: 'user' | 'assistant';
@@ -94,7 +100,7 @@ export interface AnthropicThinkingConfig {
 export interface AnthropicRequest {
 	model: string;
 	messages: AnthropicMessage[];
-	system?: string | Array<{ type: 'text'; text: string }>;
+	system?: string | Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>;
 	max_tokens: number;
 	stream: boolean;
 	temperature?: number;
@@ -118,11 +124,20 @@ export interface AnthropicToolCall {
 
 // ---- Stream callbacks ----
 
+/**
+ * A thinking block once Anthropic has finished streaming it. The signature
+ * (or the opaque redacted payload) is what makes it replayable: the API
+ * rejects thinking blocks sent back without it.
+ */
+export type CompletedThinkingBlock =
+	| { type: 'thinking'; thinking: string; signature: string }
+	| { type: 'redacted_thinking'; data: string };
+
 export interface StreamCallbacks {
 	onContent: (content: string) => void;
 	onThinking: (text: string) => void;
+	onThinkingBlock?: (block: CompletedThinkingBlock) => void;
 	onToolCall: (toolCall: AnthropicToolCall) => void;
-	onToolCallDelta?: (id: string, name: string, argumentsDelta: string) => void;
 	onError: (error: Error) => void;
 	onDone: () => void;
 	onUsage?: (usage: AnthropicUsage) => void;
@@ -149,7 +164,8 @@ export interface ThinkingCapability {
 	supportedEfforts: readonly ReasoningEffort[];
 	defaultEffort: ReasoningEffort;
 	canDisable: boolean;
-	adaptiveThinking?: boolean;}
+	adaptiveThinking?: boolean;
+}
 
 export interface ModelDefinition {
 	id: string;

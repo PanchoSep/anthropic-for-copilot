@@ -62,6 +62,7 @@ export const CLAUDE_CODE_IDENTITY_SYSTEM_PROMPT =
 export interface AnthropicSystemBlock {
 	type: 'text';
 	text: string;
+	cache_control?: { type: 'ephemeral' };
 }
 
 /**
@@ -72,13 +73,17 @@ export interface AnthropicSystemBlock {
  * merely a substring.
  */
 export function buildSystemWithClaudeCodeIdentity(
-	system: string | undefined,
+	system: string | AnthropicSystemBlock[] | undefined,
 ): AnthropicSystemBlock[] {
 	const blocks: AnthropicSystemBlock[] = [
 		{ type: 'text', text: CLAUDE_CODE_IDENTITY_SYSTEM_PROMPT },
 	];
 	if (system) {
-		blocks.push({ type: 'text', text: system });
+		if (typeof system === 'string') {
+			blocks.push({ type: 'text', text: system });
+		} else {
+			blocks.push(...system);
+		}
 	}
 	return blocks;
 }
