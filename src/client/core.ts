@@ -1,14 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import type { CancellationToken } from 'vscode';
 import { getCustomHeaders } from '../config';
 import { buildSdkAuth, CLAUDE_CODE_IDENTITY_SYSTEM_PROMPT, type Credential } from '../credentials';
 import { safeStringify } from '../json';
 import { logger } from '../logger';
 import type {
-    AnthropicRequest,
-    AnthropicToolCall,
-    AnthropicUsage,
-    StreamCallbacks,
+	AnthropicRequest,
+	AnthropicToolCall,
+	AnthropicUsage,
+	CompletedThinkingBlock,
+	StreamCallbacks,
 } from '../types';
 import { buildMessagesEndpoint, normalizeSdkBaseUrl } from './base-url';
 import { formatRequestError, normalizeRequestError, sanitizeHeaders } from './error';
@@ -59,7 +63,17 @@ export class AnthropicClient {
 				`customHeaders=${safeStringify(sanitizeHeaders(customHeaders))}`,
 		);
 
+		const payloadPath = join(tmpdir(), `anthropic-request-${Date.now()}.json`);
+		try {
+			await writeFile(payloadPath, safeStringify(request, null, 2), 'utf8');
+			logger.info(`Full request payload saved to: ${payloadPath}`);
+			console.log(`Full request payload saved to: ${payloadPath}`);
+		} catch (err) {
+			logger.warn(`Failed to save request payload: ${err}`);
+		}
+
 		const pendingToolCalls = new Map<number, AnthropicToolCall>();
+		const pendingThinking = new Map<number, { thinking: string; signature: string }>();
 		const latestUsage: AnthropicUsage = { input_tokens: 0, output_tokens: 0 };
 
 		try {
@@ -90,16 +104,32 @@ export class AnthropicClient {
 				return;
 			}
 
-			stream.on('streamEvent', (event) => {
+			let eventCount = 0;
+			let finalized = false;
+			const finalize = () => {
+				// `message_stop` and the post-loop path would otherwise both report,
+				// handing Copilot the same usage twice.
+				if (finalized) {
+					return;
+				}
+				finalized = true;
+				flushPendingToolCalls(pendingToolCalls, callbacks);
+				reportFinalUsage(callbacks, latestUsage);
+				callbacks.onDone();
+			};
+
+			for await (const event of stream) {
+				eventCount++;
+
 				if (cancellationToken?.isCancellationRequested) {
 					stream.controller.abort();
-					return;
+					break;
 				}
 
 				switch (event.type) {
 					case 'message_start': {
 						if (event.message?.usage) {
-							accumulateUsage(latestUsage, event.message.usage as any);
+							mergeUsageSnapshot(latestUsage, event.message.usage as any);
 						}
 						break;
 					}
@@ -112,9 +142,19 @@ export class AnthropicClient {
 								callbacks.onContent(block.text);
 							}
 						} else if (block?.type === 'thinking') {
-							if ((block as any).thinking) {
-								callbacks.onThinking((block as any).thinking);
+							const initial: string = (block as any).thinking ?? '';
+							pendingThinking.set(index, {
+								thinking: initial,
+								signature: (block as any).signature ?? '',
+							});
+							if (initial) {
+								callbacks.onThinking(initial);
 							}
+						} else if (block?.type === 'redacted_thinking') {
+							callbacks.onThinkingBlock?.({
+								type: 'redacted_thinking',
+								data: (block as any).data ?? '',
+							});
 						} else if (block?.type === 'tool_use') {
 							pendingToolCalls.set(index, {
 								id: block.id || `tool_${Date.now()}_${index}`,
@@ -135,19 +175,21 @@ export class AnthropicClient {
 						if (delta?.type === 'text_delta' && delta.text) {
 							callbacks.onContent(delta.text);
 						} else if (delta?.type === 'thinking_delta' && (delta as any).thinking) {
-							callbacks.onThinking((delta as any).thinking);
+							const text: string = (delta as any).thinking;
+							const thinking = pendingThinking.get(index);
+							if (thinking) {
+								thinking.thinking += text;
+							}
+							callbacks.onThinking(text);
+						} else if (delta?.type === 'signature_delta') {
+							const thinking = pendingThinking.get(index);
+							if (thinking) {
+								thinking.signature += (delta as any).signature ?? '';
+							}
 						} else if (delta?.type === 'input_json_delta' && delta.partial_json) {
 							const pending = pendingToolCalls.get(index);
 							if (pending) {
 								pending.function.arguments += delta.partial_json;
-								// Report incremental tool call arguments if callback is provided
-								if (callbacks.onToolCallDelta) {
-									callbacks.onToolCallDelta(
-										pending.id,
-										pending.function.name,
-										pending.function.arguments,
-									);
-								}
 							}
 						}
 						break;
@@ -155,6 +197,11 @@ export class AnthropicClient {
 
 					case 'content_block_stop': {
 						const index = event.index;
+						const thinking = pendingThinking.get(index);
+						if (thinking) {
+							pendingThinking.delete(index);
+							emitThinkingBlock(callbacks, thinking);
+						}
 						const pending = pendingToolCalls.get(index);
 						if (pending) {
 							callbacks.onToolCall(pending);
@@ -165,26 +212,21 @@ export class AnthropicClient {
 
 					case 'message_delta': {
 						if (event.usage) {
-							accumulateUsage(latestUsage, event.usage as any);
+							mergeUsageSnapshot(latestUsage, event.usage as any);
 						}
 						break;
 					}
 
 					case 'message_stop': {
-						flushPendingToolCalls(pendingToolCalls, callbacks);
-						reportFinalUsage(callbacks, latestUsage);
-						callbacks.onDone();
+						finalize();
 						break;
 					}
 				}
-			});
+			}
 
-			await stream.done();
 			cancelListener?.dispose();
 
-			flushPendingToolCalls(pendingToolCalls, callbacks);
-			reportFinalUsage(callbacks, latestUsage);
-			callbacks.onDone();
+			finalize();
 		} catch (error) {
 			if (isAbortError(error) && cancellationToken?.isCancellationRequested) {
 				return;
@@ -245,6 +287,22 @@ function describeSystem(system: AnthropicRequest['system']): string {
 	return `chars=${chars} identity=${identity}`;
 }
 
+function emitThinkingBlock(
+	callbacks: StreamCallbacks,
+	thinking: { thinking: string; signature: string },
+): void {
+	// A thinking block without a signature can never be replayed, so it is not worth reporting.
+	if (!thinking.signature) {
+		return;
+	}
+	const block: CompletedThinkingBlock = {
+		type: 'thinking',
+		thinking: thinking.thinking,
+		signature: thinking.signature,
+	};
+	callbacks.onThinkingBlock?.(block);
+}
+
 function flushPendingToolCalls(
 	pendingToolCalls: Map<number, AnthropicToolCall>,
 	callbacks: StreamCallbacks,
@@ -255,22 +313,26 @@ function flushPendingToolCalls(
 	pendingToolCalls.clear();
 }
 
-function accumulateUsage(target: AnthropicUsage, source: Partial<AnthropicUsage>): void {
-	if (typeof source.input_tokens === 'number') {
-		target.input_tokens = (target.input_tokens || 0) + source.input_tokens;
-	}
-	if (typeof source.output_tokens === 'number') {
-		target.output_tokens = (target.output_tokens || 0) + source.output_tokens;
-	}
-	if (typeof (source as any).cache_read_input_tokens === 'number') {
-		target.cache_read_input_tokens =
-			(target.cache_read_input_tokens || 0) + (source as any).cache_read_input_tokens;
-	}
-	if (typeof (source as any).cache_creation_input_tokens === 'number') {
-		target.cache_creation_input_tokens =
-			(target.cache_creation_input_tokens || 0) + (source as any).cache_creation_input_tokens;
-	}
-	// prompt_tokens debe incluir TODOS los tokens de entrada: input + cache_creation + cache_read
+// Anthropic reports usage as cumulative snapshots (`message_start` carries the
+// input side, `message_delta` the running output total) and some relays repeat
+// the full snapshot in `message_delta`. Summing them therefore double-counts the
+// input: 2 input + 75,559 cache-write tokens were reported as 151,122.
+function mergeUsageSnapshot(target: AnthropicUsage, source: Partial<AnthropicUsage>): void {
+	// Widening keeps a later, smaller delta from erasing an earlier total.
+	const take = (current: number | undefined, next: unknown): number | undefined =>
+		typeof next === 'number' ? Math.max(current ?? 0, next) : current;
+
+	target.input_tokens = take(target.input_tokens, source.input_tokens)!;
+	target.output_tokens = take(target.output_tokens, source.output_tokens)!;
+	target.cache_read_input_tokens = take(
+		target.cache_read_input_tokens,
+		(source as any).cache_read_input_tokens,
+	);
+	target.cache_creation_input_tokens = take(
+		target.cache_creation_input_tokens,
+		(source as any).cache_creation_input_tokens,
+	);
+	// prompt_tokens includes every input flavour: input + cache_creation + cache_read
 	const cacheRead = target.cache_read_input_tokens || 0;
 	const cacheCreation = target.cache_creation_input_tokens || 0;
 	target.prompt_tokens = target.input_tokens + cacheRead + cacheCreation;

@@ -1,7 +1,7 @@
 import vscode from 'vscode';
 import { createUserFacingError } from '../client';
 import { logger } from '../logger';
-import type { AnthropicToolCall, AnthropicUsage } from '../types';
+import type { AnthropicToolCall, AnthropicUsage, CompletedThinkingBlock } from '../types';
 import {
 	observeCancellationToken,
 	type CacheDiagnosticsRun,
@@ -14,13 +14,13 @@ import {
 } from './replay';
 import type { PreparedChatRequest } from './request';
 import { formatRequestLogLine, type RequestKind } from './routing';
+import { THINKING_COMPLETE_KEY, THINKING_REDACTED_KEY, THINKING_SIGNATURE_KEY } from './thinking';
 
 interface ResponseStreamState {
 	accumulatedReasoning: string;
 	emittedToolCallIds: string[];
 	initialResponseNoticeReported: boolean;
 	replayMarkerReported: boolean;
-	pendingToolCallParts: Map<string, vscode.LanguageModelToolCallPart>;
 }
 
 const COPILOT_USAGE_DATA_PART_MIME = 'usage';
@@ -47,7 +47,6 @@ export function streamChatCompletion({
 		emittedToolCallIds: [],
 		initialResponseNoticeReported: false,
 		replayMarkerReported: false,
-		pendingToolCallParts: new Map(),
 	};
 	const cancelListener = observeCancellationToken(token, prepared.cacheDiagnostics);
 
@@ -65,9 +64,9 @@ export function streamChatCompletion({
 					handleThinking(text, state, progress);
 				},
 
-				onToolCallDelta: (id: string, name: string, argumentsDelta: string) => {
+				onThinkingBlock: (block: CompletedThinkingBlock) => {
 					reportInitialResponseNoticeOnce(progress, state, initialResponseNotice);
-					handleToolCallDelta(id, name, argumentsDelta, state, progress);
+					handleThinkingBlock(block, progress);
 				},
 
 				onToolCall: (toolCall: AnthropicToolCall) => {
@@ -230,61 +229,53 @@ function handleThinking(
 	);
 }
 
-function handleToolCallDelta(
-	id: string,
-	name: string,
-	argumentsDelta: string,
+// Copilot hands thinking parts back on the next turn with the `metadata` it was
+// given here, which is how a signed block survives the round trip through a
+// tool loop. The streamed text above is display-only and is ignored on replay.
+function handleThinkingBlock(
+	block: CompletedThinkingBlock,
+	progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+): void {
+	const metadata =
+		block.type === 'redacted_thinking'
+			? { [THINKING_REDACTED_KEY]: block.data }
+			: {
+					[THINKING_SIGNATURE_KEY]: block.signature,
+					[THINKING_COMPLETE_KEY]: block.thinking,
+				};
+	progress.report(
+		new vscode.LanguageModelThinkingPart(
+			'',
+			undefined,
+			metadata,
+		) as unknown as vscode.LanguageModelResponsePart,
+	);
+}
+
+// Each reported LanguageModelToolCallPart is a distinct call to VS Code, so a
+// tool call must be reported exactly once, with its complete arguments.
+// Reporting partial updates under the same id replays duplicate `tool_use`
+// ids in history, which Anthropic rejects with a 400.
+function handleToolCall(
+	toolCall: AnthropicToolCall,
 	state: ResponseStreamState,
 	progress: vscode.Progress<vscode.LanguageModelResponsePart>,
 ): void {
-	let existingPart = state.pendingToolCallParts.get(id);
-	
-	if (!existingPart) {
-		// First delta for this tool call - create and report initial part
-		try {
-			const args = JSON.parse(argumentsDelta);
-			existingPart = new vscode.LanguageModelToolCallPart(id, name, args);
-		} catch {
-			// JSON incomplete, report empty args for now
-			existingPart = new vscode.LanguageModelToolCallPart(id, name, {});
-		}
-		state.pendingToolCallParts.set(id, existingPart);
-		progress.report(existingPart);
-	} else {
-		// Update existing part with new delta
-		try {
-			const args = JSON.parse(argumentsDelta);
-			const updatedPart = new vscode.LanguageModelToolCallPart(id, name, args);
-			state.pendingToolCallParts.set(id, updatedPart);
-			progress.report(updatedPart);
-		} catch {
-			// JSON still incomplete, keep existing part
-		}
+	if (state.emittedToolCallIds.includes(toolCall.id)) {
+		return;
 	}
-}
+	state.emittedToolCallIds.push(toolCall.id);
 
-function handleToolCall(
-    toolCall: AnthropicToolCall,
-    state: ResponseStreamState,
-    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-): void {
-    state.emittedToolCallIds.push(toolCall.id);
-    
-    // Check if this tool call was already streamed via deltas
-    const wasStreamed = state.pendingToolCallParts.has(toolCall.id);
-    state.pendingToolCallParts.delete(toolCall.id);
-
-    // Only report if it wasn't already streamed incrementally
-    if (!wasStreamed) {
-        try {
-            const args = JSON.parse(toolCall.function.arguments);
-            progress.report(
-                new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.function.name, args),
-            );
-        } catch {
-            progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.function.name, {}));
-        }
-    }
+	let args: object = {};
+	try {
+		const parsed: unknown = JSON.parse(toolCall.function.arguments || '{}');
+		if (parsed && typeof parsed === 'object') {
+			args = parsed;
+		}
+	} catch {
+		// Malformed arguments: fall back to empty input rather than dropping the call.
+	}
+	progress.report(new vscode.LanguageModelToolCallPart(toolCall.id, toolCall.function.name, args));
 }
 
 function finalizeReplayDiagnostics(
@@ -322,7 +313,7 @@ function reportCopilotContextUsage(
 	const data = {
 		prompt_tokens: promptTokens,
 		completion_tokens: completionTokens,
-		total_tokens: usage.total_tokens ?? (promptTokens + completionTokens),
+		total_tokens: usage.total_tokens ?? promptTokens + completionTokens,
 		prompt_tokens_details: {
 			cached_tokens: usage.prompt_cache_hit_tokens ?? usage.cache_read_input_tokens ?? 0,
 		},

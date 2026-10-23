@@ -7,11 +7,16 @@ import { t } from '../i18n';
 import { logger } from '../logger';
 import { parseModelId } from '../model-id';
 import type { AnthropicRequest } from '../types';
-import { convertMessages, convertTools, countMessageChars } from './convert';
 import {
-    dumpAnthropicRequest,
-    type CacheDiagnosticsRecorder,
-    type CacheDiagnosticsRun,
+	canContinueToolLoopWithThinking,
+	convertMessages,
+	convertTools,
+	countMessageChars,
+} from './convert';
+import {
+	dumpAnthropicRequest,
+	type CacheDiagnosticsRecorder,
+	type CacheDiagnosticsRun,
 } from './debug';
 import { getConfiguredThinkingEffort, type ModelConfigurationOptions } from './models';
 import type { ReplayMarkerMetadata } from './replay';
@@ -82,8 +87,13 @@ export async function prepareChatRequest({
 		getDescriber: getVisionDescriber,
 	});
 
+	const configuredThinkingEffort = thinkingCapability
+		? getConfiguredThinkingEffort(options as ModelConfigurationOptions, thinkingCapability)
+		: 'none';
+	const thinkingRequested = isThinkingModel && configuredThinkingEffort !== 'none';
+
 	const resolvedMessages = visionResolution.messages;
-	const converted = convertMessages(resolvedMessages, isThinkingModel, nativeImageInput);
+	const converted = convertMessages(resolvedMessages, thinkingRequested, nativeImageInput);
 	const anthropicMessages = converted.messages;
 
 	const isOAuthToken = isOAuthAccessToken(credential.value);
@@ -112,15 +122,24 @@ export async function prepareChatRequest({
 			visionResolution.stats.tool.forwardedImageParts >
 			0;
 
-	const configuredThinkingEffort = thinkingCapability
-		? getConfiguredThinkingEffort(options as ModelConfigurationOptions, thinkingCapability)
-		: 'none';
-
 	const thinkingBudget = getThinkingBudgetTokens(configuredThinkingEffort, maxTokens);
 	const useAdaptiveThinking =
 		thinkingCapability !== false && thinkingCapability?.adaptiveThinking === true;
 
 	const { model, betas } = parseModelId(getApiModelId(modelInfo.id));
+
+	// `adaptive` lets the model skip thinking on a turn, so only `enabled` is bound
+	// by the "tool loop must continue from a thinking block" rule.
+	const thinkingBreaksToolLoop =
+		thinkingRequested &&
+		!useAdaptiveThinking &&
+		!canContinueToolLoopWithThinking(anthropicMessages);
+	if (thinkingBreaksToolLoop) {
+		logger.warn(
+			'Thinking disabled for this request: the in-flight tool loop has no signed thinking block to continue from.',
+		);
+	}
+	const sendThinking = thinkingRequested && !thinkingBreaksToolLoop;
 
 	const request: AnthropicRequest = {
 		model,
@@ -131,7 +150,7 @@ export async function prepareChatRequest({
 		max_tokens: maxTokens,
 		tools,
 		tool_choice: tools && tools.length > 0 ? { type: 'auto' } : undefined,
-		...(isThinkingModel && configuredThinkingEffort !== 'none'
+		...(sendThinking
 			? useAdaptiveThinking
 				? {
 						thinking: {
@@ -146,9 +165,7 @@ export async function prepareChatRequest({
 						},
 					}
 			: {}),
-		...(isThinkingModel && configuredThinkingEffort !== 'none'
-			? { output_config: { effort: configuredThinkingEffort } }
-			: {}),
+		...(sendThinking ? { output_config: { effort: configuredThinkingEffort } } : {}),
 	};
 
 	const requestKind = classifyAnthropicRequest({

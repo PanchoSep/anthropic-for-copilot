@@ -4,13 +4,13 @@ import { safeStringify } from '../../json';
 import type { AnthropicMessage } from '../../types';
 import { API_PROVIDER_HTTP_ERROR_LINKS, MAX_DIAGNOSTIC_FIELD_LENGTH } from '../consts';
 import type {
-    AnthropicRequestErrorKind,
-    ApiProviderId,
-    ErrorActionLink,
-    ErrorActionUrls,
-    HttpErrorLinkDefinition,
-    HttpErrorLinkStatusKey,
-    RequestErrorContext,
+	AnthropicRequestErrorKind,
+	ApiProviderId,
+	ErrorActionLink,
+	ErrorActionUrls,
+	HttpErrorLinkDefinition,
+	HttpErrorLinkStatusKey,
+	RequestErrorContext,
 } from '../types';
 import { getNetworkErrorCauseInfo, getNetworkErrorCode, getNetworkErrorMessage } from './network';
 export type { AnthropicRequestErrorKind, ErrorActionUrls } from '../types';

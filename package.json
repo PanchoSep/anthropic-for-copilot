@@ -3,7 +3,7 @@
 	"displayName": "Anthropic Claude for Copilot Chat",
 	"description": "Use Anthropic Claude (Sonnet 5, Opus 5, Fable 5.1) with 1M context in Copilot Chat with native vision, custom API Key, custom Base URL, reasoning, and agent tools.",
 	"icon": "resources/icon.png",
-	"version": "1.1.2",
+	"version": "1.2.17",
 	"publisher": "Luorj",
 	"author": "Luorj",
 	"license": "MIT",

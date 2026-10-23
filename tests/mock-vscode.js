@@ -39,6 +39,13 @@ class LanguageModelToolCallPart {
 		this.input = input;
 	}
 }
+class LanguageModelThinkingPart {
+	constructor(value, id, metadata) {
+		this.value = value;
+		this.id = id;
+		this.metadata = metadata;
+	}
+}
 class LanguageModelToolResultPart {
 	constructor(callId, content) {
 		this.callId = callId;
@@ -84,6 +91,7 @@ const vscodeStub = {
 	LanguageModelChatMessageRole: { User: 1, Assistant: 2, System: 3 },
 	LanguageModelTextPart,
 	LanguageModelToolCallPart,
+	LanguageModelThinkingPart,
 	LanguageModelToolResultPart,
 	LanguageModelDataPart,
 };

@@ -5,13 +5,17 @@ type WellFormedString = string & {
 	toWellFormed?: () => string;
 };
 
-export function safeStringify(value: unknown): string {
-	const json = JSON.stringify(value, (_key, entryValue: unknown) => {
-		if (typeof entryValue === 'string') {
-			return toWellFormedString(entryValue);
-		}
-		return entryValue;
-	});
+export function safeStringify(value: unknown, replacer?: any, space?: string | number): string {
+	const json = JSON.stringify(
+		value,
+		(_key, entryValue: unknown) => {
+			if (typeof entryValue === 'string') {
+				return toWellFormedString(entryValue);
+			}
+			return entryValue;
+		},
+		space,
+	);
 
 	if (json === undefined) {
 		throw new TypeError('Value cannot be serialized as JSON');

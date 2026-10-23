@@ -17,7 +17,7 @@ describe('Adaptive Thinking', () => {
 
 		it('should be true for Opus 5', () => {
 			const { MODELS } = require('../../src/consts');
-			const opus = MODELS.find((m: any) => m.id === 'claude-opus-5');
+			const opus = MODELS.find((m: any) => m.id === 'claude-opus-5-5');
 			assert.ok(opus, 'Opus 5 model should exist');
 			assert.ok(opus.capabilities.thinking, 'Opus should have thinking capability');
 			assert.strictEqual(
@@ -29,7 +29,7 @@ describe('Adaptive Thinking', () => {
 
 		it('should be true for Sonnet 5', () => {
 			const { MODELS } = require('../../src/consts');
-			const sonnet = MODELS.find((m: any) => m.id === 'claude-sonnet-5');
+			const sonnet = MODELS.find((m: any) => m.id === 'claude-sonnet-5-5');
 			assert.ok(sonnet, 'Sonnet 5 model should exist');
 			assert.ok(sonnet.capabilities.thinking, 'Sonnet should have thinking capability');
 			assert.strictEqual(
